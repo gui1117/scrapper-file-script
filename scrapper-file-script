@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+import os
+import argparse
+import tkinter as tk  # Import tkinter for clipboard operations
+
+# Hardcoded directories we don't want to descend into by default
+EXCLUDE_DIRS = {"target", ".git", "node_modules", "dist", "build", "weight", "weights"}
+
+# Hardcoded files we want to ignore by default
+EXCLUDE_FILES = {"weight.rs", "weights.rs"}
+
+def _prune_dirs_inplace(dirs):
+    dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
+
+def is_rust_file(filename):
+    return filename.endswith('.rs')
+
+def is_cargo_toml(filename):
+    return filename == 'Cargo.toml'
+
+def find_crate_roots(workspace_root):
+    # A simplistic approach: Just return all directories that contain a Cargo.toml
+    crate_roots = []
+    for root, dirs, files in os.walk(workspace_root):
+        _prune_dirs_inplace(dirs)
+        if 'Cargo.toml' in files:
+            crate_roots.append(root)
+    return crate_roots
+
+def gather_files(crate_root):
+    # Gather all relevant files (Cargo.toml and .rs files) inside this crate
+    crate_files = []
+    for root, dirs, files in os.walk(crate_root):
+        _prune_dirs_inplace(dirs)
+        for f in files:
+            if f in EXCLUDE_FILES:
+                continue
+            if is_cargo_toml(f) or is_rust_file(f):
+                full_path = os.path.join(root, f)
+                crate_files.append(full_path)
+    return crate_files
+
+def format_file_content(filepath):
+    with open(filepath, 'r', encoding='utf-8') as f:
+        content = f.read()
+    filename = os.path.relpath(filepath)
+    # Determine the code block language
+    if filepath.endswith('.rs'):
+        lang = 'rust'
+    elif filepath.endswith('Cargo.toml'):
+        lang = 'toml'
+    else:
+        lang = ''
+    # Format for ChatGPT
+    if lang:
+        return f"{filename}\n```{lang}\n{content}\n```\n"
+    else:
+        return f"{filename}\n```\n{content}\n```\n"
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Scrape Rust workspace files and save their contents.")
+    parser.add_argument(
+        "paths", type=str, nargs='+', help="The paths to start scraping from."
+    )
+    parser.add_argument(
+        "--output", type=str, default="workspace_files.txt", help="The output file name (default: workspace_files.txt)."
+    )
+    parser.add_argument(
+        "-T", action="store_true", help="Avoid scraping test files (test.rs, tests.rs) and subdirectories (test, tests)."
+    )
+    parser.add_argument(
+        "-B", action="store_true", help="Avoid scraping benchmark files (benchmark.rs, benchmarks.rs) and subdirectories (benchmark, benchmarks)."
+    )
+
+    args = parser.parse_args()
+
+    # Update exclusion sets based on provided flags
+    if args.T:
+        EXCLUDE_DIRS.update({"test", "tests"})
+        EXCLUDE_FILES.update({"test.rs", "tests.rs"})
+        
+    if args.B:
+        EXCLUDE_DIRS.update({"benchmark", "benchmarks", "bench", "benches"})
+        EXCLUDE_FILES.update({"benchmark.rs", "benchmarks.rs", "bench.rs", "benches.rs"})
+
+    output_file = args.output
+    all_files = []
+
+    for workspace_root in args.paths:
+        if not os.path.isdir(workspace_root):
+            print(f"Error: The specified path '{workspace_root}' is not a directory.")
+            continue
+
+        crate_roots = find_crate_roots(workspace_root)
+        for crate_root in crate_roots:
+            files = gather_files(crate_root)
+            all_files.extend(files)
+
+    # Remove duplicates and sort for consistent output
+    all_files = list(set(all_files))
+    all_files.sort()
+
+    # Accumulate formatted file content into a variable
+    all_data = ""
+
+    with open(output_file, 'w', encoding='utf-8') as out:
+        for fpath in all_files:
+            formatted = format_file_content(fpath)
+            out.write(formatted + "\n")
+            all_data += formatted + "\n"
+
+    print(f"All files have been printed in '{output_file}'.")
+
+    # Use Tkinter to set the clipboard with the same data.
+    root = tk.Tk()
+    root.withdraw()  # Hide the main window
+    root.clipboard_clear()  # Clear the clipboard contents
+    root.clipboard_append(all_data)  # Add our data to the clipboard
+    root.update()  # Ensure the clipboard is updated
+    root.destroy()  # Destroy the Tkinter instance
+
+    print("Data has also been copied to the clipboard.")
