@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import argparse
+import subprocess
 import tkinter as tk  # Import tkinter for clipboard operations
 
 # Hardcoded directories we don't want to descend into by default
@@ -51,7 +52,7 @@ def format_file_content(filepath):
         lang = 'toml'
     else:
         lang = ''
-    # Format for ChatGPT
+    # Format for ChatGPT/Claude
     if lang:
         return f"{filename}\n```{lang}\n{content}\n```\n"
     else:
@@ -71,6 +72,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-B", action="store_true", help="Avoid scraping benchmark files (benchmark.rs, benchmarks.rs) and subdirectories (benchmark, benchmarks)."
     )
+    parser.add_argument(
+        "--review", type=str, help="Fetch PR diff via GitHub CLI and format output for an AI review prompt."
+    )
 
     args = parser.parse_args()
 
@@ -78,7 +82,7 @@ if __name__ == "__main__":
     if args.T:
         EXCLUDE_DIRS.update({"test", "tests"})
         EXCLUDE_FILES.update({"test.rs", "tests.rs"})
-        
+
     if args.B:
         EXCLUDE_DIRS.update({"benchmark", "benchmarks", "bench", "benches"})
         EXCLUDE_FILES.update({"benchmark.rs", "benchmarks.rs", "bench.rs", "benches.rs"})
@@ -101,13 +105,45 @@ if __name__ == "__main__":
     all_files.sort()
 
     # Accumulate formatted file content into a variable
-    all_data = ""
+    code_data = ""
+    for fpath in all_files:
+        formatted = format_file_content(fpath)
+        code_data += formatted + "\n"
 
+    # Handle the AI review formatting if the flag is provided
+    final_output = ""
+    if args.review:
+        try:
+            print(f"Fetching PR #{args.review} diff...")
+            result = subprocess.run(
+                ["gh", "pr", "diff", args.review],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            pr_diff = result.stdout
+
+            final_output = f"""This is the PR diff and the code, review and audit the PR.
+
+This is the PR diff:
+```diff
+{pr_diff}
+```
+
+This is the code:
+{code_data}"""
+        except subprocess.CalledProcessError as e:
+            print(f"Error fetching PR diff: {e.stderr}")
+            exit(1)
+        except FileNotFoundError:
+            print("Error: 'gh' CLI tool not found. Please ensure it is installed and in your PATH.")
+            exit(1)
+    else:
+        final_output = code_data
+
+    # Write the final output to the file
     with open(output_file, 'w', encoding='utf-8') as out:
-        for fpath in all_files:
-            formatted = format_file_content(fpath)
-            out.write(formatted + "\n")
-            all_data += formatted + "\n"
+        out.write(final_output)
 
     print(f"All files have been printed in '{output_file}'.")
 
@@ -115,7 +151,7 @@ if __name__ == "__main__":
     root = tk.Tk()
     root.withdraw()  # Hide the main window
     root.clipboard_clear()  # Clear the clipboard contents
-    root.clipboard_append(all_data)  # Add our data to the clipboard
+    root.clipboard_append(final_output)  # Add our data to the clipboard
     root.update()  # Ensure the clipboard is updated
     root.destroy()  # Destroy the Tkinter instance
 
