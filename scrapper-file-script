@@ -36,6 +36,9 @@ def gather_files(crate_root):
         for f in files:
             if f in EXCLUDE_FILES:
                 continue
+            # Always exclude benchmarking/proof_cache.rs
+            if f == "proof_cache.rs" and os.path.basename(root) == "benchmarking":
+                continue
             if is_cargo_toml(f) or is_rust_file(f):
                 full_path = os.path.join(root, f)
                 crate_files.append(full_path)
@@ -84,8 +87,8 @@ if __name__ == "__main__":
         EXCLUDE_FILES.update({"test.rs", "tests.rs"})
 
     if args.B:
-        EXCLUDE_DIRS.update({"benchmark", "benchmarks", "bench", "benches"})
-        EXCLUDE_FILES.update({"benchmark.rs", "benchmarks.rs", "bench.rs", "benches.rs"})
+        EXCLUDE_DIRS.update({"benchmark", "benchmarks", "bench", "benches", "benchmarking", "benchmarkings"})
+        EXCLUDE_FILES.update({"benchmark.rs", "benchmarks.rs", "bench.rs", "benches.rs", "benchmarking.rs", "benchmarkings.rs"})
 
     output_file = args.output
     all_files = []
